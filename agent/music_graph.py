@@ -644,8 +644,12 @@ class MusicRecommendationGraph:
         logger.info(f"根据意图 '{intent_type}' 进行路由")
 
         # 3 类检索策略意图 → 统一走 search_songs 节点（retrieval_plan 已明确 use_graph/use_vector）
-        if intent_type in ["graph_search", "hybrid_search", "vector_search", "web_search"]:
+        if intent_type in ["graph_search", "hybrid_search", "vector_search"]:
             return "search_songs"
+        elif intent_type == "web_search":
+            # web_search 直接走 web_fallback（网易云 API 搜可播放歌曲）
+            # 不走 MusicHybridRetrieval 的纯文本联网搜索（只返回资讯不返回音频）
+            return "web_fallback"
         elif intent_type == "recommend_by_favorites":
             # 查用户收藏：路由到 generate_recommendations，内部有专门的收藏召回逻辑
             return "generate_recommendations"
@@ -742,7 +746,7 @@ class MusicRecommendationGraph:
                 "search_results": search_results,
                 "recommendations": raw_hybrid_result if raw_hybrid_result and raw_hybrid_result.success else [],
                 "_need_web_fallback": need_web_fallback,
-                "_web_fallback_query": " ".join(graph_entities[:2]) if graph_entities else query,
+                "_web_fallback_query": " ".join(graph_entities[:4]) if graph_entities else query,
                 "step_count": state.get("step_count", 0) + 1
             }
             
@@ -769,21 +773,55 @@ class MusicRecommendationGraph:
 
     async def web_fallback_node(self, state: MusicAgentState) -> Dict[str, Any]:
         """
-        节点：本地库未命中时自动降级到网易云 API 联网搜索。
+        节点：本地库未命中或 web_search 意图时，从网易云 API 联网搜索。
         不下载，只返回流媒体 URL，供前端即时播放。
+        支持从 _web_fallback_query / intent_parameters / graph_entities / input 多级获取查询词。
         """
-        logger.info("--- [步骤] 本地未命中，降级联网搜索 ---")
-        query = state.get("_web_fallback_query") or state.get("input", "")
+        logger.info("--- [步骤] 联网搜索（网易云 API）---")
+
+        # ── 多级查询词提取（Netease 搜索需要中文原文，不能用英文翻译）──
+        # 优先使用用户原始输入（中文），因为 graph_entities 可能包含英文翻译
+        user_input = state.get("input", "")
+        fallback_query = state.get("_web_fallback_query", "")
+        
+        # 检测是否包含中文字符
+        import re as _re
+        has_chinese = lambda s: bool(_re.search(r'[\u4e00-\u9fff]', s))
+        
+        if has_chinese(user_input):
+            # 用户原始输入包含中文 → 清理后直接用于 Netease 搜索
+            query = _re.sub(r'^(搜索|查找|找|听|播放|我想听|帮我找)\s*', '', user_input).strip()
+        elif has_chinese(fallback_query):
+            query = fallback_query
+        elif fallback_query:
+            query = fallback_query
+        else:
+            # web_search 意图直达时，从 intent_parameters / retrieval_plan 提取
+            params = state.get("intent_parameters", {})
+            retrieval_plan = state.get("retrieval_plan") or {}
+            graph_entities = retrieval_plan.get("graph_entities", [])
+            web_keywords = retrieval_plan.get("web_search_keywords", "")
+            if graph_entities:
+                query = " ".join(graph_entities[:4])
+            elif web_keywords:
+                query = web_keywords
+            elif params.get("query"):
+                query = params["query"]
+            else:
+                query = user_input
+        logger.info(f"[web_fallback] 查询词: '{query}'")
 
         try:
             import aiohttp
             from config.settings import settings as _cfg
             api_base = _cfg.netease_api_base
-            timeout = aiohttp.ClientTimeout(total=8)
+            timeout = aiohttp.ClientTimeout(total=10)
 
             async with aiohttp.ClientSession() as session:
                 # 1) 搜索
-                search_url = f"{api_base}/search?keywords={query}&limit=5"
+                import re as _re
+                clean_query = _re.sub(r'[《》\[\]【】]', ' ', query).strip()
+                search_url = f"{api_base}/search?keywords={clean_query}&limit=5"
                 async with session.get(search_url, timeout=timeout) as resp:
                     data = await resp.json()
 
@@ -808,15 +846,22 @@ class MusicRecommendationGraph:
                 except Exception:
                     pass  # 详情获取失败不影响主流程
 
-                # 3) 批量获取播放链接
-                play_url_map = {}
+                # 3) 批量获取播放链接（检测 freeTrialInfo 30s 试听）
+                play_url_map = {}     # sid → url
+                trial_info_map = {}   # sid → bool (是否为 30s 试听)
                 try:
                     url_api = f"{api_base}/song/url?id={','.join(song_ids)}&level=exhigh"
                     async with session.get(url_api, timeout=timeout) as uresp:
                         udata = await uresp.json()
                     for item in udata.get("data", []):
+                        sid = str(item.get("id", ""))
                         if item.get("url"):
-                            play_url_map[str(item["id"])] = item["url"]
+                            play_url_map[sid] = item["url"]
+                            # 检测 30s 试听：freeTrialInfo 不为 null 表示试听版
+                            is_trial = item.get("freeTrialInfo") is not None
+                            trial_info_map[sid] = is_trial
+                            if is_trial:
+                                logger.warning(f"[web_fallback] 歌曲 {sid} 为 30s 试听版")
                 except Exception:
                     pass
 
@@ -835,6 +880,7 @@ class MusicRecommendationGraph:
                     album = detail.get("al", {}).get("name", "") or s.get("album", {}).get("name", "")
 
                     play_url = play_url_map.get(sid, "")
+                    is_trial = trial_info_map.get(sid, False)
 
                     results.append({
                         "song": {
@@ -847,11 +893,13 @@ class MusicRecommendationGraph:
                             "cover_url": cover_url,
                             "source": "online_search",
                             "platform": "netease",
+                            "is_trial": is_trial,       # 标记是否 30s 试听
                         }
                     })
 
             matched = sum(1 for r in results if r["song"]["preview_url"])
-            logger.info(f"[web_fallback] 联网返回 {len(results)} 首歌曲，{matched} 首可播放")
+            trial_count = sum(1 for r in results if r["song"].get("is_trial"))
+            logger.info(f"[web_fallback] 联网返回 {len(results)} 首歌曲，{matched} 首可播放，{trial_count} 首为试听版")
 
             from schemas.music_state import ToolOutput
             return {
@@ -2003,6 +2051,7 @@ class MusicRecommendationGraph:
             {
                 "acquire_online_music": "acquire_online_music",
                 "search_songs": "search_songs",
+                "web_fallback": "web_fallback",  # web_search 意图直达联网搜索
                 "generate_recommendations": "generate_recommendations",
                 "analyze_user_preferences": "analyze_user_preferences",
                 "general_chat": "general_chat"
