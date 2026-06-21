@@ -45,6 +45,12 @@ from schemas.query_plan import MusicQueryPlan, RetrievalPlan
 
 logger = get_logger(__name__)
 
+
+def _record_timing(state: MusicAgentState, name: str, elapsed_seconds: float) -> Dict[str, float]:
+    timings = dict(state.get("timings") or {})
+    timings[name] = round(max(0.0, elapsed_seconds) * 1000, 3)
+    return timings
+
 # 延迟初始化 llm，避免在模块导入时配置未加载
 _llm = None
 
@@ -379,7 +385,8 @@ class MusicRecommendationGraph:
                 "intent_parameters": plan.parameters,
                 "intent_context": plan.context,
                 "retrieval_plan": retrieval_plan_dict,
-                "step_count": state.get("step_count", 0) + 1
+                "step_count": state.get("step_count", 0) + 1,
+                "timings": _record_timing(state, "intent_ms", _time.time() - _t0),
             }
             
         except Exception as e:
@@ -411,7 +418,8 @@ class MusicRecommendationGraph:
                 "step_count": state.get("step_count", 0) + 1,
                 "error_log": state.get("error_log", []) + [
                     {"node": "analyze_intent", "error": str(e), "degraded_to": "vector_search"}
-                ]
+                ],
+                "timings": _record_timing(state, "intent_ms", _time.time() - _t0),
             }
     
     def route_by_intent(self, state: MusicAgentState) -> str:
@@ -468,6 +476,10 @@ class MusicRecommendationGraph:
                 search_results = []
             
             logger.info(f"搜索到 {len(search_results)} 首歌曲, 耗时 {_time.time()-_t0:.1f}s")
+            timings = dict(state.get("timings") or {})
+            if raw_hybrid_result and getattr(raw_hybrid_result, "metadata", None):
+                timings.update(raw_hybrid_result.metadata.get("timings") or {})
+            timings["search_node_ms"] = round((_time.time() - _t0) * 1000, 3)
 
             # ══ 本地未命中检测：graph_search 有实体但结果不精确时，降级联网 ══
             # Case 1: 完全无结果
@@ -546,7 +558,8 @@ class MusicRecommendationGraph:
                 "recommendations": raw_hybrid_result if raw_hybrid_result and raw_hybrid_result.success else [],
                 "_need_web_fallback": need_web_fallback,
                 "_web_fallback_query": " ".join(graph_entities[:4]) if graph_entities else query,
-                "step_count": state.get("step_count", 0) + 1
+                "step_count": state.get("step_count", 0) + 1,
+                "timings": timings,
             }
             
         except Exception as e:
@@ -559,7 +572,8 @@ class MusicRecommendationGraph:
                 "step_count": state.get("step_count", 0) + 1,
                 "error_log": state.get("error_log", []) + [
                     {"node": "search_songs", "error": str(e)}
-                ]
+                ],
+                "timings": _record_timing(state, "search_node_ms", _time.time() - _t0),
             }
 
 
@@ -576,6 +590,8 @@ class MusicRecommendationGraph:
         不下载，只返回流媒体 URL，供前端即时播放。
         支持从 _web_fallback_query / intent_parameters / graph_entities / input 多级获取查询词。
         """
+        import time as _time
+        _t0 = _time.time()
         logger.info("--- [步骤] 联网搜索（网易云 API）---")
 
         # ── 多级查询词提取（Netease 搜索需要中文原文，不能用英文翻译）──
@@ -650,7 +666,8 @@ class MusicRecommendationGraph:
                     logger.warning(f"[web_fallback] 联网搜索无结果: {query}")
                     return {"search_results": [], "recommendations": [],
                             "_need_web_fallback": False,
-                            "step_count": state.get("step_count", 0) + 1}
+                            "step_count": state.get("step_count", 0) + 1,
+                            "timings": _record_timing(state, "web_fallback_ms", _time.time() - _t0)}
 
                 # 收集 song_ids 用于批量获取详情
                 song_ids = [str(s["id"]) for s in songs[:5]]
@@ -751,6 +768,7 @@ class MusicRecommendationGraph:
                 ),
                 "_need_web_fallback": False,
                 "step_count": state.get("step_count", 0) + 1,
+                "timings": _record_timing(state, "web_fallback_ms", _time.time() - _t0),
             }
 
         except Exception as e:
@@ -759,6 +777,7 @@ class MusicRecommendationGraph:
                 "search_results": [], "recommendations": [],
                 "_need_web_fallback": False,
                 "step_count": state.get("step_count", 0) + 1,
+                "timings": _record_timing(state, "web_fallback_ms", _time.time() - _t0),
             }
 
     async def acquire_online_music_node(self, state: MusicAgentState) -> Dict[str, Any]:
@@ -1144,7 +1163,8 @@ class MusicRecommendationGraph:
             return {
                 "explanation": "抱歉，没有找到合适的音乐推荐。",
                 "final_response": "抱歉，没有找到符合你要求的音乐。你可以换个方式描述你的需求，或者告诉我你喜欢的歌手和风格？",
-                "step_count": state.get("step_count", 0) + 1
+                "step_count": state.get("step_count", 0) + 1,
+                "timings": _record_timing(state, "explanation_ms", _time.time() - _t0),
             }
 
         if os.getenv("MUSIC_MOCK_MODE", "0").lower() in {"1", "true", "yes"}:
@@ -1158,6 +1178,7 @@ class MusicRecommendationGraph:
                 "explanation": response,
                 "final_response": response,
                 "step_count": state.get("step_count", 0) + 1,
+                "timings": _record_timing(state, "explanation_ms", _time.time() - _t0),
             }
 
         _explain = get_explain_llm()
@@ -1259,7 +1280,8 @@ class MusicRecommendationGraph:
             return {
                 "explanation": explanation,
                 "final_response": final_response,
-                "step_count": state.get("step_count", 0) + 1
+                "step_count": state.get("step_count", 0) + 1,
+                "timings": _record_timing(state, "explanation_ms", _time.time() - _t0),
             }
             
         except Exception as e:
@@ -1286,7 +1308,8 @@ class MusicRecommendationGraph:
                 "step_count": state.get("step_count", 0) + 1,
                 "error_log": state.get("error_log", []) + [
                     {"node": "generate_explanation", "error": str(e)}
-                ]
+                ],
+                "timings": _record_timing(state, "explanation_ms", _time.time() - _t0),
             }
     
     async def analyze_user_preferences_node(self, state: MusicAgentState) -> Dict[str, Any]:
@@ -1574,11 +1597,14 @@ class MusicRecommendationGraph:
         - Stage 2 失败 → 退回 Stage 1 结果
         - Stage 1 也失败 → 返回空
         """
-        if os.getenv("MUSIC_MOCK_MODE", "0").lower() in {"1", "true", "yes"}:
-            return {"graphzep_facts": "", "graphzep_group_id": "mock"}
-
         import time as _time
         _t0 = _time.time()
+        if os.getenv("MUSIC_MOCK_MODE", "0").lower() in {"1", "true", "yes"}:
+            return {
+                "graphzep_facts": "",
+                "graphzep_group_id": "mock",
+                "timings": _record_timing(state, "graphzep_ms", _time.time() - _t0),
+            }
         logger.info("--- [GraphZep] 双阶段记忆召回 ---")
         
         # ★ 整体硬超时：GraphZep 服务可能因 LLM 调用而阻塞很久（尤其 Docker 环境）
@@ -1664,17 +1690,26 @@ class MusicRecommendationGraph:
             result = await asyncio.wait_for(_do_recall(), timeout=_GRAPHZEP_TOTAL_TIMEOUT)
             _elapsed = _time.time() - _t0
             logger.info(f"[GraphZep] ✅ 记忆召回完成, 总耗时 {_elapsed:.1f}s")
-            return result
+            return {
+                **result,
+                "timings": _record_timing(state, "graphzep_ms", _elapsed),
+            }
         except asyncio.TimeoutError:
             _elapsed = _time.time() - _t0
             logger.warning(
                 f"[GraphZep] ⚠️ 记忆召回超时 ({_elapsed:.1f}s > {_GRAPHZEP_TOTAL_TIMEOUT}s)，"
                 f"降级为空记忆以保证推荐流程不阻塞"
             )
-            return {"graphzep_facts": "暂无用户长期记忆"}
+            return {
+                "graphzep_facts": "暂无用户长期记忆",
+                "timings": _record_timing(state, "graphzep_ms", _elapsed),
+            }
         except Exception as e:
             logger.warning(f"[GraphZep] 记忆召回失败（降级为空）: {e}")
-            return {"graphzep_facts": "暂无用户长期记忆"}
+            return {
+                "graphzep_facts": "暂无用户长期记忆",
+                "timings": _record_timing(state, "graphzep_ms", _time.time() - _t0),
+            }
 
     async def extract_preferences_node(self, state: MusicAgentState) -> Dict[str, Any]:
         """
