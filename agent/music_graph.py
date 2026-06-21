@@ -23,6 +23,7 @@ from langchain_core.output_parsers import StrOutputParser
 
 from config.logging_config import get_logger
 from config.settings import settings
+from agent.explanation import build_fast_explanation
 from agent.intent import IntentPlanner
 from agent.netease_query import (
     artist_matches,
@@ -1141,6 +1142,26 @@ class MusicRecommendationGraph:
         recommendations = getattr(raw_recommendations, "data", raw_recommendations)
         
         user_query = state.get("input", "")
+        request_id = state.get("metadata", {}).get("request_id", "")
+        explanation_queue = self._explanation_queues.get(request_id) if request_id else None
+
+        async def _push_song_cards() -> None:
+            if not explanation_queue or not recommendations:
+                return
+            songs_payload = []
+            for i, rec in enumerate(recommendations):
+                song = rec.get("song", rec) if isinstance(rec, dict) else rec
+                if isinstance(song, dict) and song.get("title"):
+                    songs_payload.append({"song": song, "index": i})
+            if songs_payload:
+                await explanation_queue.put({"__songs__": songs_payload})
+
+        async def _finish_queue(response: str = "") -> None:
+            if not explanation_queue:
+                return
+            if response:
+                await explanation_queue.put(response)
+            await explanation_queue.put(None)
         
         # 判断是否有真实内容
         has_real_content = False
@@ -1155,6 +1176,7 @@ class MusicRecommendationGraph:
                 
         if not recommendations or not has_real_content:
             logger.warning("没有推荐结果，跳过解释生成")
+            await _finish_queue()
             return {
                 "explanation": "抱歉，没有找到合适的音乐推荐。",
                 "final_response": "抱歉，没有找到符合你要求的音乐。你可以换个方式描述你的需求，或者告诉我你喜欢的歌手和风格？",
@@ -1164,11 +1186,20 @@ class MusicRecommendationGraph:
 
         if os.getenv("MUSIC_MOCK_MODE", "0").lower() in {"1", "true", "yes"}:
             response = "Mock 模式推荐已完成，检索、路由与流式响应链路工作正常。"
-            request_id = state.get("metadata", {}).get("request_id")
-            queue = self._explanation_queues.get(request_id) if request_id else None
-            if queue:
-                await queue.put(response)
-                await queue.put(None)
+            await _push_song_cards()
+            await _finish_queue(response)
+            return {
+                "explanation": response,
+                "final_response": response,
+                "step_count": state.get("step_count", 0) + 1,
+                "timings": _record_timing(state, "explanation_ms", _time.time() - _t0),
+            }
+
+        if settings.explanation_fast_mode:
+            response = build_fast_explanation(recommendations)
+            await _push_song_cards()
+            await _finish_queue(response)
+            logger.info("[Explanation] fast-mode 跳过解释 LLM")
             return {
                 "explanation": response,
                 "final_response": response,
@@ -1228,23 +1259,11 @@ class MusicRecommendationGraph:
                 | StrOutputParser()
             )
             
-            # 流式生成推荐解释：通过 astream 逐 chunk 送入队列
-            # 并发安全：通过 request_id 从注册表中取出当前请求专属的队列
-            _req_id = state.get("metadata", {}).get("request_id", "")
-            explanation_queue = self._explanation_queues.get(_req_id) if _req_id else None
-            
             # ★ 先把歌曲数据推入队列，让前端立刻渲染歌曲卡片
-            if explanation_queue and recommendations:
-                try:
-                    songs_payload = []
-                    for i, rec in enumerate(recommendations):
-                        song = rec.get("song", rec) if isinstance(rec, dict) else rec
-                        if isinstance(song, dict) and song.get("title"):
-                            songs_payload.append({"song": song, "index": i})
-                    if songs_payload:
-                        await explanation_queue.put({"__songs__": songs_payload})
-                except Exception as e:
-                    logger.warning(f"推送歌曲到队列失败: {e}")
+            try:
+                await _push_song_cards()
+            except Exception as e:
+                logger.warning(f"推送歌曲到队列失败: {e}")
             
             explanation = ""
             async for chunk in chain.astream({
@@ -1283,11 +1302,9 @@ class MusicRecommendationGraph:
             logger.error(f"生成解释失败: {str(e)}")
             
             # 确保队列收到终止信号，防止前端消费者永久阻塞
-            _req_id = state.get("metadata", {}).get("request_id", "")
-            _err_queue = self._explanation_queues.get(_req_id) if _req_id else None
-            if _err_queue:
+            if explanation_queue:
                 try:
-                    await _err_queue.put(None)
+                    await explanation_queue.put(None)
                 except Exception:
                     pass
             
@@ -1306,7 +1323,7 @@ class MusicRecommendationGraph:
                 ],
                 "timings": _record_timing(state, "explanation_ms", _time.time() - _t0),
             }
-    
+
     async def analyze_user_preferences_node(self, state: MusicAgentState) -> Dict[str, Any]:
         """
         节点: 分析用户偏好 ⭐ NEW
@@ -1604,7 +1621,7 @@ class MusicRecommendationGraph:
         
         # ★ 整体硬超时：GraphZep 服务可能因 LLM 调用而阻塞很久（尤其 Docker 环境）
         # 记忆召回是锦上添花功能，不能因此阻塞推荐主流程
-        _GRAPHZEP_TOTAL_TIMEOUT = 8  # 秒
+        graphzep_total_timeout = max(0.5, float(settings.graphzep_total_timeout_seconds))
         
         async def _do_recall() -> Dict[str, Any]:
             user_input = state.get("input", "")
@@ -1682,7 +1699,7 @@ class MusicRecommendationGraph:
                 return {"graphzep_facts": "暂无用户长期记忆"}
         
         try:
-            result = await asyncio.wait_for(_do_recall(), timeout=_GRAPHZEP_TOTAL_TIMEOUT)
+            result = await asyncio.wait_for(_do_recall(), timeout=graphzep_total_timeout)
             _elapsed = _time.time() - _t0
             logger.info(f"[GraphZep] ✅ 记忆召回完成, 总耗时 {_elapsed:.1f}s")
             return {
@@ -1692,7 +1709,7 @@ class MusicRecommendationGraph:
         except asyncio.TimeoutError:
             _elapsed = _time.time() - _t0
             logger.warning(
-                f"[GraphZep] ⚠️ 记忆召回超时 ({_elapsed:.1f}s > {_GRAPHZEP_TOTAL_TIMEOUT}s)，"
+                f"[GraphZep] ⚠️ 记忆召回超时 ({_elapsed:.1f}s > {graphzep_total_timeout}s)，"
                 f"降级为空记忆以保证推荐流程不阻塞"
             )
             return {

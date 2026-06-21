@@ -1,6 +1,6 @@
 # SoulTuner-Agent · 规划文档（ROADMAP / 单一事实源）
 
-> 维护：每完成一个里程碑就更新「现状快照」与对应条目的勾选。最近更新：2026-06-21。
+> 维护：每完成一个里程碑就更新「现状快照」与对应条目的勾选。最近更新：2026-06-22。
 > 本文件是计划的**唯一事实源**；深度论证见下方「文档地图」里的专题文档。
 
 ---
@@ -27,9 +27,10 @@
 - **A1 = R1 检索层重构**：五路并行召回（图谱/稠密/BM25/个性化/冷启动）→ 加权 RRF → `hard_constraints + DISLIKES` 唯一硬过滤 → 原三锚/MMR。关键词二次改判与 graph/vector on/off 已清零。改前→改后：dev `35/50 (70%) → 38/50 (76%)`，holdout `15/20 (75%) → 15/20 (75%)`；单测 `97 passed`。
 - **A1.5 = R1.5 稀疏过滤与联网健壮性**：语言/地区按“已知匹配 → 未知标签 → 不足时从 RRF 补齐”分层，实体/纯音乐/拉黑始终严格；网易云搜索加入有界重试，播放 URL 使用批量优先 + 单曲并发补偿。最终 dev `44/50 (88%)`、holdout `16/20 (80%)`，单测 `102 passed`。
 - **✅ A1.6 = R1.6 库存感知与联网约束闭环**：联网降级只看最终库存与分层硬约束，不再依赖 intent label；字面 `soft_intent.avoid` 同样过滤联网结果；API 返回库存、来源与降级原因。4 个目标回归 `4/4`，holdout `17/20 (85%)`，单测 `109 passed`。
+- **✅ B1.1 = S3 延迟快赢**：GraphZep 离线熔断缓存、Planner 结果缓存、解释 fast-mode、HF offline 与项目私有 `.env` 密钥优先级已落地。dev 端到端 p50 `29.88s → 8.88s`，解释 p50 `17.41s → 0.00s`；holdout `17/20 → 19/20`。
 - 模型统一为 `qwen3.7-plus`；最终报告记录 git `46c3e4e83ffe`、Planner `temperature=0`。
 
-> 检索控制流与联网约束闭环已完成。Phase N 下一步按 S1 数据先做 B1 延迟快赢；韩语库存与软排序保留为后续质量里程碑。
+> 检索控制流、联网约束闭环与第一轮延迟快赢已完成。Phase N 下一步做 S4 英文自然语言镜像用例；韩语库存、软排序与联网尾延迟保留为后续质量/性能里程碑。
 
 ---
 
@@ -67,7 +68,7 @@
 
 | 里程碑 | 目标 | 关键动作 | 依赖 | 验收 |
 |---|---|---|---|---|
-| **B1 = P3 降延迟** | 普通 3–8s / 复杂联网 10–15s | GraphZep 熔断（并入 A6）、Planner 输出缓存(query+profile hash)、explanation fast mode、HF offline、web fallback 优先 Netease | — | 完整 eval 用时显著下降 |
+| **B1 = P3 降延迟** | 普通 3–8s / 复杂联网 10–15s | GraphZep 熔断（并入 A6）、Planner 输出缓存(query+profile hash)、explanation fast mode、HF offline、web fallback 优先 Netease | — | S3 第一轮已通过：dev p50 29.88s→8.88s；后续继续压 Planner 与 web fallback p95 |
 | **B2 = P6 部署一键化** | 真一键 | `soultuner.ps1 up lite/standard`、固定端口、doctor 给"下一步按钮式建议"、`PUBLIC_DEMO_MODE=1`(禁入库/下载/路径暴露、限频、脱敏日志、mock 数据) | — | 一条命令起栈；demo 模式安全 |
 | **B3 = P7 前端表达** | 用户看得懂"为什么推它" | 命中意图标签可视化、来源标注、无结果可操作建议、反馈按钮(喜欢/不喜欢/换一批/太吵/太慢/更小众)、dev-only 调试面板 | A3(反馈表) | 反馈按钮回写反馈表 |
 | **B4 = P8 数据合规** | 可公网推广 | 默认不分发音频，只展示元数据/解释/用户自有曲库；demo 用 mock/无版权 | — | demo 不含版权音频 |
@@ -89,7 +90,7 @@
 | S0 | 提交 R1.5 + 登记本批次 | ✅ `73c4a96` | `102 passed`；隐私扫描通过 |
 | S1 | 分阶段计时 + outcome eval 延迟基线 | ✅ 基线完成 | dev：端到端 p50 `29.88s` / p95 `42.52s` |
 | S2 | A1.6 库存感知 + 联网约束闭环 | ✅ 已完成 | 目标回归 `4/4`；holdout `17/20 (85%)`；`109 passed` |
-| S3 | B1 GraphZep 熔断、HF offline、解释 fast-mode、Planner 缓存 | 待执行 | p50 明显下降；holdout 不退 |
+| S3 | B1 GraphZep 熔断、HF offline、解释 fast-mode、Planner 缓存 | ✅ 已完成 | dev p50 `29.88s → 8.88s`；holdout `17/20 → 19/20`；详见 `tests/eval/S3_LATENCY_FAST_MODE_2026-06.md` |
 | S4 | 英文自然语言镜像用例与条件触发 A2 | 待执行 | 量化中英差距；差距 ≥15pp 才做最小 A2 |
 | S5 | B2 Docker 三步启动 + README/README_EN 去 stale | 待执行 | 新手 ≤3 条命令起栈；doctor 全绿 |
 | S6a | 前端 bug 审计与关键流程 smoke | 待执行 | 无 console error；推荐/播放/反馈/曲库通过 |
@@ -114,6 +115,6 @@
 
 ## 6. 下一步
 
-**先做 S3 / B1 延迟快赢，再用英文镜像用例决定是否触发 A2。**
+**先做 S4 英文镜像用例，再决定是否触发 A2。**
 
-S2 已回收 4 个联网/否定目标并把 holdout 提升到 85%。S1 显示主要延迟来自解释生成（p50 17.41s）和 Planner（p50 6.85s），本地五路召回不是瓶颈；因此下一步先做 GraphZep 熔断复用、Planner 缓存与 explanation fast-mode。A2 只在 S4 英文对照集证实差距后触发。
+S3 已把解释生成从评测/fast 路径移出，并让 GraphZep 离线状态快速降级；dev 端到端 p50 从 29.88s 降到 8.88s，holdout 升到 95%。但 Planner 仍是主要本地耗时，联网 p95 仍高。下一步按 S4 加英文镜像 outcome 用例，量化中英差距；A2 只在英文显著低于中文时触发。

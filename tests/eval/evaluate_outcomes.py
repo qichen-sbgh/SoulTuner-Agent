@@ -62,7 +62,7 @@ from typing import Any, Dict, List, Tuple
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent.parent))
 
 from dotenv import load_dotenv  # noqa: E402
-load_dotenv()
+load_dotenv(override=True)
 
 from tests.eval.soft_judge import judge_objective_soft_intent  # noqa: E402
 
@@ -212,7 +212,11 @@ def _effective_model_config(settings, provider: str, planner_temperature: float)
             "temperature": planner_temperature,
             "max_tokens": settings.intent_max_tokens,
         },
-        "explain": {"provider": explain_provider, "model": explain_model},
+        "explain": {
+            "provider": explain_provider,
+            "model": explain_model,
+            "fast_mode": bool(settings.explanation_fast_mode),
+        },
         "compress": {"provider": compress_provider, "model": compress_model},
         "llm_timeout": settings.llm_timeout,
     }
@@ -426,12 +430,14 @@ async def run(
     verbose: bool,
     planner_temperature: float,
     timing: bool = False,
+    fast: bool = False,
 ) -> Dict[str, Any]:
     # 延迟导入：让 --help 在无重依赖时也能用
     from config.settings import settings
     settings.intent_llm_provider = provider
     settings.llm_default_provider = provider
     settings.intent_temperature = planner_temperature
+    settings.explanation_fast_mode = fast
     from agent.music_agent import MusicRecommendationAgent
 
     cases, case_meta = _load_cases(cases_file=cases_file, split=split)
@@ -444,6 +450,7 @@ async def run(
         f"{model_meta['intent']['provider']} / {model_meta['intent']['model']} "
         f"(temperature={planner_temperature}, max_tokens={model_meta['intent']['max_tokens']})"
     )
+    print(f"Explanation fast-mode: {settings.explanation_fast_mode}")
     print(f"Git: {git_meta['branch']} @ {git_meta['sha'][:12]} | dirty={git_meta['dirty']}\n")
 
     agent = MusicRecommendationAgent()
@@ -590,6 +597,8 @@ def main():
     p.add_argument("--quiet", action="store_true")
     p.add_argument("--timing", action="store_true",
                    help="记录并汇总 Agent/检索各阶段的 p50/p95 延迟")
+    p.add_argument("--fast", action="store_true",
+                   help="跳过解释 LLM，保留歌曲结果并生成确定性简短说明")
     args = p.parse_args()
     asyncio.run(run(
         args.provider,
@@ -599,6 +608,7 @@ def main():
         verbose=not args.quiet,
         planner_temperature=args.planner_temperature,
         timing=args.timing,
+        fast=args.fast,
     ))
 
 
