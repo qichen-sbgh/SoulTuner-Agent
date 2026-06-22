@@ -62,7 +62,9 @@ from typing import Any, Dict, List, Tuple
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent.parent))
 
 from dotenv import load_dotenv  # noqa: E402
-load_dotenv()
+load_dotenv(override=True)
+
+from tests.eval.soft_judge import judge_objective_soft_intent  # noqa: E402
 
 EVAL_DIR = Path(__file__).parent
 CASES_DIR = EVAL_DIR / "cases"
@@ -78,6 +80,41 @@ CASE_SPLITS = {
 # ----------------------------------------------------------------------------
 def _norm(s: Any) -> str:
     return str(s or "").strip().lower()
+
+
+def _percentile(values: List[float], quantile: float) -> float:
+    """Linear-interpolated percentile without a NumPy dependency."""
+    if not values:
+        return 0.0
+    ordered = sorted(float(value) for value in values)
+    if len(ordered) == 1:
+        return ordered[0]
+    position = max(0.0, min(1.0, quantile)) * (len(ordered) - 1)
+    lower = int(position)
+    upper = min(lower + 1, len(ordered) - 1)
+    weight = position - lower
+    return ordered[lower] * (1 - weight) + ordered[upper] * weight
+
+
+def _summarize_timings(reports: List[Dict[str, Any]]) -> Dict[str, Any]:
+    by_stage: Dict[str, List[float]] = defaultdict(list)
+    for report in reports:
+        for stage, value in (report.get("timings_ms") or {}).items():
+            if isinstance(value, (int, float)) and value >= 0:
+                by_stage[stage].append(float(value))
+    return {
+        "unit": "ms",
+        "case_count": len(reports),
+        "stages": {
+            stage: {
+                "count": len(values),
+                "mean": round(sum(values) / len(values), 3),
+                "p50": round(_percentile(values, 0.50), 3),
+                "p95": round(_percentile(values, 0.95), 3),
+            }
+            for stage, values in sorted(by_stage.items())
+        },
+    }
 
 
 def _unwrap_songs(result: Dict[str, Any]) -> List[Dict[str, Any]]:
@@ -107,28 +144,6 @@ def _field_values(song: Dict[str, Any], *names: str) -> List[str]:
         elif _norm(val):
             values.append(_norm(val))
     return values
-
-
-def _objective_tokens(song: Dict[str, Any]) -> List[str]:
-    """Objective fields only: no generated explanation, no title/artist leakage."""
-    tokens = []
-    for value in _field_values(
-        song,
-        "genre",
-        "genres",
-        "moods",
-        "scenarios",
-        "language",
-        "region",
-        "instrumental",
-        "is_instrumental",
-    ):
-        for part in str(value).replace("/", " ").replace("|", " ").replace(",", " ").replace("，", " ").split():
-            if _norm(part):
-                tokens.append(_norm(part))
-        if _norm(value):
-            tokens.append(_norm(value))
-    return sorted(set(tokens))
 
 
 def _is_degraded(result: Dict[str, Any]) -> bool:
@@ -197,7 +212,11 @@ def _effective_model_config(settings, provider: str, planner_temperature: float)
             "temperature": planner_temperature,
             "max_tokens": settings.intent_max_tokens,
         },
-        "explain": {"provider": explain_provider, "model": explain_model},
+        "explain": {
+            "provider": explain_provider,
+            "model": explain_model,
+            "fast_mode": bool(settings.explanation_fast_mode),
+        },
         "compress": {"provider": compress_provider, "model": compress_model},
         "llm_timeout": settings.llm_timeout,
     }
@@ -328,56 +347,9 @@ def _c_not_degraded(songs, val, result) -> Tuple[str, str]:
     return ("fail" if deg else "pass", "意图分析触发了降级兜底" if deg else "未降级")
 
 
-def _tag_hit(tokens: List[str], wanted: List[str]) -> bool:
-    return any(w and any(w in token or token in w for token in tokens) for w in wanted)
-
-
 def _c_objective_soft_judge(songs, val, result) -> Tuple[str, str]:
-    """Heuristic soft-intent judge over objective song attributes.
-
-    This is intentionally conservative. It should be calibrated against a human
-    gold set before being enabled broadly in dev/holdout cases.
-    """
-    if not isinstance(val, dict):
-        return ("skip", "objective_soft_judge 配置不是对象，跳过")
-    if not songs:
-        return ("fail", "无结果")
-
-    positive = [_norm(x) for x in val.get("positive_any", [])]
-    negative = [_norm(x) for x in val.get("negative_any", [])]
-    min_positive = float(val.get("min_positive_ratio", 0.0))
-    max_negative = float(val.get("max_negative_ratio", 1.0))
-    min_coverage = float(val.get("min_coverage_ratio", 0.5))
-    if not positive and not negative:
-        return ("skip", "未提供 positive_any/negative_any，跳过")
-
-    tokenized = [(s, _objective_tokens(s)) for s in songs]
-    covered = [(s, tokens) for s, tokens in tokenized if tokens]
-    if not covered:
-        return ("skip", "返回歌曲缺少可判定的客观标签字段")
-
-    coverage_ratio = len(covered) / len(songs)
-    pos_hits = sum(1 for _, tokens in covered if _tag_hit(tokens, positive)) if positive else len(covered)
-    neg_hits = sum(1 for _, tokens in covered if _tag_hit(tokens, negative)) if negative else 0
-    pos_ratio = pos_hits / len(covered)
-    neg_ratio = neg_hits / len(covered)
-
-    failures = []
-    if coverage_ratio < min_coverage:
-        failures.append(f"coverage {len(covered)}/{len(songs)} = {coverage_ratio:.0%}，要求 ≥ {min_coverage:.0%}")
-    if positive and pos_ratio < min_positive:
-        failures.append(f"positive {pos_hits}/{len(covered)} = {pos_ratio:.0%}，要求 ≥ {min_positive:.0%}")
-    if negative and neg_ratio > max_negative:
-        failures.append(f"negative {neg_hits}/{len(covered)} = {neg_ratio:.0%}，要求 ≤ {max_negative:.0%}")
-
-    detail = (
-        f"coverage {len(covered)}/{len(songs)} = {coverage_ratio:.0%}; "
-        f"positive {pos_hits}/{len(covered)} = {pos_ratio:.0%}; "
-        f"negative {neg_hits}/{len(covered)} = {neg_ratio:.0%}"
-    )
-    if failures:
-        return ("fail", "; ".join(failures))
-    return ("pass", detail)
+    decision = judge_objective_soft_intent(songs, val)
+    return decision.status, decision.detail
 
 
 # 硬 check 名 → 处理器；带 *_ratio 的需要读取整个 checks（因为它们配对取另一个键）
@@ -457,12 +429,15 @@ async def run(
     limit: int,
     verbose: bool,
     planner_temperature: float,
+    timing: bool = False,
+    fast: bool = False,
 ) -> Dict[str, Any]:
     # 延迟导入：让 --help 在无重依赖时也能用
     from config.settings import settings
     settings.intent_llm_provider = provider
     settings.llm_default_provider = provider
     settings.intent_temperature = planner_temperature
+    settings.explanation_fast_mode = fast
     from agent.music_agent import MusicRecommendationAgent
 
     cases, case_meta = _load_cases(cases_file=cases_file, split=split)
@@ -475,6 +450,7 @@ async def run(
         f"{model_meta['intent']['provider']} / {model_meta['intent']['model']} "
         f"(temperature={planner_temperature}, max_tokens={model_meta['intent']['max_tokens']})"
     )
+    print(f"Explanation fast-mode: {settings.explanation_fast_mode}")
     print(f"Git: {git_meta['branch']} @ {git_meta['sha'][:12]} | dirty={git_meta['dirty']}\n")
 
     agent = MusicRecommendationAgent()
@@ -483,12 +459,24 @@ async def run(
 
     for i, case in enumerate(cases, 1):
         query = case["query"]
+        case_started = time.perf_counter()
         try:
             result = await agent.get_recommendations(query, chat_history=case.get("chat_history"))
         except Exception as e:  # 单 case 失败不应中断整轮
             result = {"recommendations": [], "intent_type": "ERROR",
                       "errors": [{"node": "harness", "error": str(e)}]}
         rep = evaluate_case(case, result)
+        if timing:
+            case_timings = {
+                name: round(float(value), 3)
+                for name, value in (result.get("timings") or {}).items()
+                if isinstance(value, (int, float)) and value >= 0
+            }
+            case_timings["end_to_end_ms"] = round(
+                (time.perf_counter() - case_started) * 1000,
+                3,
+            )
+            rep["timings_ms"] = case_timings
         reports.append(rep)
 
         if verbose:
@@ -525,6 +513,28 @@ async def run(
     if decided:
         print(f"可判定用例通过率: {n_pass}/{decided} = {n_pass/decided:.1%}")
     print(f"总耗时: {time.time()-t_start:.1f}s\n")
+
+    timing_summary = _summarize_timings(reports) if timing else None
+    if timing_summary:
+        print("延迟分阶段 (ms):")
+        print(f"  {'stage':24s} {'count':>6s} {'mean':>10s} {'p50':>10s} {'p95':>10s}")
+        print(f"  {'-'*64}")
+        preferred_order = [
+            "end_to_end_ms", "agent_total_ms", "graphzep_ms", "intent_ms",
+            "retrieval_total_ms", "recall_graph_ms", "recall_dense_ms",
+            "recall_lexical_ms", "recall_personal_ms", "recall_cold_ms",
+            "fusion_filter_ms", "ranking_ms", "web_fallback_ms", "explanation_ms",
+        ]
+        stages = timing_summary["stages"]
+        ordered_stages = [stage for stage in preferred_order if stage in stages]
+        ordered_stages.extend(stage for stage in stages if stage not in ordered_stages)
+        for stage in ordered_stages:
+            stats = stages[stage]
+            print(
+                f"  {stage:24s} {stats['count']:>6d} {stats['mean']:>10.1f} "
+                f"{stats['p50']:>10.1f} {stats['p95']:>10.1f}"
+            )
+        print()
     print("按 check 类型:")
     print(f"  {'check':24s} {'pass':>6s} {'fail':>6s} {'skip':>6s}")
     print(f"  {'-'*44}")
@@ -564,6 +574,8 @@ async def run(
         "decided_pass_rate": round(n_pass / decided, 4) if decided else None,
         "by_check": dict(by_check), "by_category": dict(by_category), "cases": reports,
     }
+    if timing_summary:
+        report["timing"] = timing_summary
     out_file.write_text(json.dumps(report, ensure_ascii=False, indent=2), encoding="utf-8")
     print(f"\n📄 详细结果: {out_file}")
     return report
@@ -583,6 +595,10 @@ def main():
     p.add_argument("--planner-temperature", type=float, default=0.0,
                    help="评测时 Planner 温度，默认 0 以提升可复现性")
     p.add_argument("--quiet", action="store_true")
+    p.add_argument("--timing", action="store_true",
+                   help="记录并汇总 Agent/检索各阶段的 p50/p95 延迟")
+    p.add_argument("--fast", action="store_true",
+                   help="跳过解释 LLM，保留歌曲结果并生成确定性简短说明")
     args = p.parse_args()
     asyncio.run(run(
         args.provider,
@@ -591,6 +607,8 @@ def main():
         args.limit,
         verbose=not args.quiet,
         planner_temperature=args.planner_temperature,
+        timing=args.timing,
+        fast=args.fast,
     ))
 
 

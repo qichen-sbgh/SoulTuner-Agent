@@ -42,9 +42,13 @@ interface PlayerContextType {
     addToQueue: (song: Song) => void;
     removeFromQueue: (title: string, artist: string) => void;
     addAllToQueue: (songs: Song[]) => void;
+    replaceQueue: (songs: Song[]) => void;
 }
 
 const PlayerContext = createContext<PlayerContextType | undefined>(undefined);
+
+const isSameSong = (a?: Song | null, b?: Song | null) =>
+    Boolean(a && b && a.title === b.title && a.artist === b.artist);
 
 export function PlayerProvider({ children }: { children: ReactNode }) {
     const [currentSong, setCurrentSong] = useState<Song | null>(null);
@@ -57,6 +61,15 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
     const [isExpanded, setExpanded] = useState(false);
 
     const audioRef = useRef<HTMLAudioElement | null>(null);
+
+    const handlePlaybackError = (error: unknown) => {
+        console.warn('Audio playback was blocked or failed:', error);
+        setIsPlaying(false);
+    };
+
+    const startAudio = (audio: HTMLAudioElement) => {
+        audio.play().catch(handlePlaybackError);
+    };
 
     useEffect(() => {
         audioRef.current = new Audio();
@@ -90,7 +103,7 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
         if (isAuto && playMode === 'loop') {
             if (audioRef.current) {
                 audioRef.current.currentTime = 0;
-                audioRef.current.play();
+                startAudio(audioRef.current);
             }
             return;
         }
@@ -114,6 +127,19 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
     }, [currentSong, queue, playMode]);
 
     const playSong = (song: Song, newQueue?: Song[]) => {
+        const audio = audioRef.current;
+        if (isSameSong(currentSong, song) && audio && !audio.ended) {
+            setCurrentSong(song);
+            if (newQueue) {
+                setQueue(newQueue);
+            }
+            if (!isPlaying && song.preview_url) {
+                startAudio(audio);
+                setIsPlaying(true);
+            }
+            return;
+        }
+
         setCurrentSong(song);
         setIsPlaying(true);
 
@@ -125,7 +151,7 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
 
         if (audioRef.current && song.preview_url) {
             audioRef.current.src = song.preview_url;
-            audioRef.current.play().catch(e => console.error("Audio play error:", e));
+            startAudio(audioRef.current);
         } else if (audioRef.current && !song.preview_url) {
             // Stop audio if no preview
             audioRef.current.pause();
@@ -153,13 +179,17 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
         });
     };
 
+    const replaceQueue = (songs: Song[]) => {
+        setQueue(songs);
+    };
+
     const togglePlay = () => {
         if (!audioRef.current || !currentSong || !currentSong.preview_url) return;
         if (isPlaying) {
             audioRef.current.pause();
             setIsPlaying(false);
         } else {
-            audioRef.current.play().catch(e => console.error("Audio play error:", e));
+            startAudio(audioRef.current);
             setIsPlaying(true);
         }
     };
@@ -215,6 +245,7 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
                 addToQueue,
                 removeFromQueue,
                 addAllToQueue,
+                replaceQueue,
             }}
         >
             {children}

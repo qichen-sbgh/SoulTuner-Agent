@@ -6,8 +6,9 @@ It is not an intent-label accuracy test.
 ## Splits
 
 - `smoke`: the original 12-case fast regression set.
-- `dev`: 50 cases for day-to-day iteration.
-- `holdout`: 20 frozen cases. Do not tune directly against this set.
+- `dev`: 56 cases for day-to-day iteration, including 6 English mirror cases.
+- `holdout`: 24 frozen cases, including 4 English mirror cases. Do not tune
+  directly against this set.
 - `all`: dev + holdout, for explicit milestone checks only.
 
 Run:
@@ -16,10 +17,20 @@ Run:
 python -m tests.eval.evaluate_outcomes --split smoke
 python -m tests.eval.evaluate_outcomes --split dev
 python -m tests.eval.evaluate_outcomes --split holdout
+python -m tests.eval.calibrate_soft_judge --min-accuracy 0.95
 ```
 
 Reports are written to `tests/eval/results/` and include git sha, branch, dirty
 state, effective model config, Planner temperature, and key non-secret settings.
+
+Add `--timing` to include per-case stage timings and aggregate p50/p95 latency:
+
+```powershell
+python -m tests.eval.evaluate_outcomes --split dev --planner-temperature 0 --timing
+```
+
+The timing report covers GraphZep, intent planning, each recall source,
+fusion/filter, ranking, web fallback, explanation, Agent total, and end to end.
 
 ## Soft-Intent Judge
 
@@ -34,6 +45,10 @@ Use it conservatively:
 - Keep low-confidence or underspecified cases in `manual_review`.
 - Prefer it for coarse objective tags such as calm/energetic/sleep/commute, not
   for subtle taste statements such as "like Friday after work".
+- The calibration seed lives in
+  `tests/eval/judge_gold/objective_soft_judge_gold.json`; it covers pass/fail/skip
+  examples and should be extended whenever a new soft-intent pattern is promoted
+  from `manual_review`.
 
 ## Discipline
 

@@ -167,6 +167,7 @@ export interface BackendSong {
     artist: string;
     audio_url?: string;
     cover_url?: string;
+    lrc_url?: string;
     album?: string;
     genre?: string;
     moods?: string[];

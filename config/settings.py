@@ -3,6 +3,24 @@ from pydantic import Field
 from typing import Optional
 from pathlib import Path
 import os
+from dotenv import dotenv_values
+
+
+PROJECT_ENV_FILE = Path(__file__).resolve().parent.parent / ".env"
+
+
+def load_project_dashscope_key(env_file: Path = PROJECT_ENV_FILE) -> bool:
+    """Prefer the project-private DashScope key over an inherited host value."""
+    if not env_file.is_file():
+        return False
+    value = str(dotenv_values(env_file).get("DASHSCOPE_API_KEY") or "").strip()
+    if not value:
+        return False
+    os.environ["DASHSCOPE_API_KEY"] = value
+    return True
+
+
+load_project_dashscope_key()
 
 class GlobalSettings(BaseSettings):
     """
@@ -106,6 +124,22 @@ class GlobalSettings(BaseSettings):
         validation_alias="EXPLAIN_LLM_MODEL",
         description="解释生成专用模型名（空则复用主模型）",
     )
+    explanation_fast_mode: bool = Field(
+        default=False,
+        validation_alias="EXPLANATION_FAST_MODE",
+        description="跳过解释 LLM，返回确定性简短说明；评测或低延迟部署可显式启用",
+    )
+
+    planner_cache_ttl_seconds: int = Field(
+        default=300,
+        validation_alias="PLANNER_CACHE_TTL_SECONDS",
+        description="Planner 结果缓存 TTL；0 表示关闭",
+    )
+    planner_cache_max_entries: int = Field(
+        default=256,
+        validation_alias="PLANNER_CACHE_MAX_ENTRIES",
+        description="单进程 Planner LRU 缓存最大条目数",
+    )
 
     # --- 上下文窗口预算 ---
     context_total_budget: int = Field(
@@ -143,6 +177,11 @@ class GlobalSettings(BaseSettings):
     vllm_base_url: str = Field("http://localhost:8000/v1", validation_alias="VLLM_BASE_URL")
     sglang_api_key: str = Field("fake_key", validation_alias="SGLANG_API_KEY")
     sglang_base_url: str = Field("http://localhost:8000/v1", validation_alias="SGLANG_BASE_URL")
+    hf_offline: bool = Field(
+        default=False,
+        validation_alias="HF_OFFLINE",
+        description="是否强制只使用本地 HuggingFace 缓存；默认关闭以保证向量检索首次启动可自动补齐文本编码器",
+    )
 
     # ================================================================
     # 4. 服务端口 & URL
@@ -157,6 +196,18 @@ class GlobalSettings(BaseSettings):
     netease_api_base: str = Field("http://localhost:3000", validation_alias="NETEASE_API_BASE")
     searxng_base_url: str = Field("http://localhost:8888", validation_alias="SEARXNG_BASE_URL")
     graphzep_base_url: str = Field("http://localhost:3100", validation_alias="GRAPHZEP_BASE_URL")
+    graphzep_request_timeout_seconds: float = Field(
+        default=3.5,
+        validation_alias="GRAPHZEP_REQUEST_TIMEOUT_SECONDS",
+    )
+    graphzep_total_timeout_seconds: float = Field(
+        default=4.0,
+        validation_alias="GRAPHZEP_TOTAL_TIMEOUT_SECONDS",
+    )
+    graphzep_unavailable_ttl_seconds: int = Field(
+        default=300,
+        validation_alias="GRAPHZEP_UNAVAILABLE_TTL_SECONDS",
+    )
 
     # ================================================================
     # 5. 路径配置
@@ -345,6 +396,7 @@ def save_user_settings(s: GlobalSettings, keys: list[str] | None = None):
         "intent_temperature",
         "hyde_llm_provider", "hyde_llm_model",
         "compress_llm_provider", "compress_llm_model",
+        "explain_llm_provider", "explain_llm_model", "explanation_fast_mode",
         "intent_max_tokens",
         "context_total_budget",
         "finetuned_model_path", "llm_timeout", "llm_temperature",
@@ -382,6 +434,16 @@ def clear_user_settings():
 
 # 暴露单例给全量代码使用
 settings = GlobalSettings()
+
+if settings.hf_offline:
+    os.environ["HF_HUB_OFFLINE"] = "1"
+    os.environ["TRANSFORMERS_OFFLINE"] = "1"
+    os.environ["HF_DATASETS_OFFLINE"] = "1"
+    os.environ["HF_HUB_DISABLE_TELEMETRY"] = "1"
+else:
+    # HF_OFFLINE=false 明确表示允许首次启动下载缺失模型，避免外部环境变量把向量检索锁死。
+    for _hf_flag in ("HF_HUB_OFFLINE", "TRANSFORMERS_OFFLINE", "HF_DATASETS_OFFLINE"):
+        os.environ.pop(_hf_flag, None)
 
 # 启动时自动加载用户上次保存的设置
 _applied = _load_user_overrides(settings)

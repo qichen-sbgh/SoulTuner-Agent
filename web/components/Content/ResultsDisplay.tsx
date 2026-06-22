@@ -24,23 +24,25 @@ interface ResultsDisplayProps {
 }
 
 export default function ResultsDisplay({ response, songs, onRemoveSong }: ResultsDisplayProps) {
-  const { addAllToQueue, playSong } = usePlayer();
+  const { playSong } = usePlayer();
   const { showToast } = useLibrary();
   const [addedAll, setAddedAll] = useState(false);
+  const queueSongs = (songs || [])
+    .filter(s => s.preview_url)
+    .map(s => ({
+      title: s.title,
+      artist: s.artist,
+      genre: s.genre,
+      preview_url: s.preview_url,
+      coverUrl: s.cover_url,
+      lrc_url: s.lrc_url,
+    }));
 
   const handleAddAllToQueue = () => {
-    if (!songs || songs.length === 0) return;
-    const songsWithUrl = songs.filter(s => s.preview_url);
-    addAllToQueue(songsWithUrl.map(s => ({ title: s.title, artist: s.artist, genre: s.genre, preview_url: s.preview_url, coverUrl: s.cover_url, lrc_url: s.lrc_url })));
-    showToast(`✚ 已将 ${songsWithUrl.length} 首歌加入播放列表`);
+    if (queueSongs.length === 0) return;
+    playSong(queueSongs[0], queueSongs);
+    showToast(`▶ 已设置 ${queueSongs.length} 首歌为播放列表`);
     setAddedAll(true);
-    // 如果这些歌有 preview_url，自动播放第一首
-    if (songsWithUrl.length > 0 && songsWithUrl[0].preview_url) {
-      playSong(
-        { title: songsWithUrl[0].title, artist: songsWithUrl[0].artist, genre: songsWithUrl[0].genre, preview_url: songsWithUrl[0].preview_url, coverUrl: songsWithUrl[0].cover_url, lrc_url: songsWithUrl[0].lrc_url },
-        songsWithUrl.map(s => ({ title: s.title, artist: s.artist, genre: s.genre, preview_url: s.preview_url, coverUrl: s.cover_url, lrc_url: s.lrc_url }))
-      );
-    }
   };
 
   return (
@@ -113,6 +115,7 @@ export default function ResultsDisplay({ response, songs, onRemoveSong }: Result
             <SongCard
               key={`${song.title}_${song.artist}_${index}`}
               {...song}
+              queueContext={queueSongs}
               onRemove={onRemoveSong ? () => onRemoveSong(index) : undefined}
             />
           ))}

@@ -8,9 +8,9 @@ const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8501';
 
 // ---- LLM 提供商预设列表 ----
 const LLM_PROVIDERS = [
+  { value: 'dashscope', label: '通义千问 DashScope (API)', defaultModel: 'qwen3.7-plus' },
   { value: 'siliconflow', label: 'SiliconFlow (API)', defaultModel: 'deepseek-ai/DeepSeek-V3.2' },
   { value: 'volcengine', label: '火山引擎 / 豆包 (字节跳动)', defaultModel: 'ep-20260405142751-x4jm6' },
-  { value: 'dashscope', label: '通义千问 DashScope (API)', defaultModel: 'qwen3.7-plus' },
   { value: 'google', label: 'Google Gemini (API)', defaultModel: 'gemini-3-flash-preview' },
   { value: 'deepseek', label: 'DeepSeek (API)', defaultModel: 'deepseek-chat' },
   { value: 'sglang', label: 'SGLang (本地推荐)', defaultModel: 'local-planner-qwen3-4b-fp8' },
@@ -60,13 +60,7 @@ export default function SettingsPanel({ isOpen, onClose }: SettingsPanelProps) {
   const [saving, setSaving] = useState(false);
   const [dirty, setDirty] = useState<Set<string>>(new Set());
   const [saveMessage, setSaveMessage] = useState('');
-  // 部署模式: 'api' = 意图+HyDE共用一个API模型, 'local' = 分别配置意图/HyDE模型
-  const [deployMode, setDeployMode] = useState<'api' | 'local'>(() => {
-    if (typeof window !== 'undefined') {
-      return (localStorage.getItem('soultuner_deploy_mode') as 'api' | 'local') || 'api';
-    }
-    return 'api';
-  });
+  const [showAdvancedModels, setShowAdvancedModels] = useState(false);
 
   // ★ 快照：记录上次从后端拿到的干净数据
   const snapshotRef = useRef<Settings>({});
@@ -337,21 +331,6 @@ export default function SettingsPanel({ isOpen, onClose }: SettingsPanelProps) {
     );
   };
 
-  // ---- 部署模式切换按钮样式 ----
-  const modeButtonStyle = (active: boolean): React.CSSProperties => ({
-    flex: 1,
-    padding: '0.55rem 0.8rem',
-    fontSize: '0.82rem',
-    fontWeight: active ? 700 : 400,
-    color: active ? '#fff' : theme.colors.text.secondary,
-    backgroundColor: active ? theme.colors.primary.accent : 'rgba(255,255,255,0.04)',
-    border: `1px solid ${active ? theme.colors.primary.accent : theme.colors.border.default}`,
-    borderRadius: theme.borderRadius.sm,
-    cursor: 'pointer',
-    transition: 'all 0.2s',
-    textAlign: 'center' as const,
-  });
-
   const sectionTitleStyle: React.CSSProperties = {
     fontSize: '0.8rem',
     color: theme.colors.text.muted,
@@ -365,86 +344,129 @@ export default function SettingsPanel({ isOpen, onClose }: SettingsPanelProps) {
   };
 
   // ---- 标签页内容 ----
-  const renderModelsTab = () => (
-    <>
-      <h4 style={{ color: theme.colors.text.primary, margin: '0 0 1rem', fontSize: '0.95rem' }}>🤖 LLM 模型配置</h4>
+  const renderModelsTab = () => {
+    const dashscopeModels = MODEL_PRESETS.dashscope;
+    const currentProvider = String(settings.llm_default_provider || 'dashscope');
+    const currentModel = String(settings.llm_default_model || 'qwen3.7-plus');
 
-      {/* ═══ 部署模式切换 ═══ */}
-      <div style={{ marginBottom: '1.2rem' }}>
-        <label style={{ ...labelStyle, marginBottom: '0.5rem' }}>部署模式</label>
-        <div style={{ display: 'flex', gap: '0.5rem' }}>
-          <button
-            style={modeButtonStyle(deployMode === 'api')}
-            onClick={() => {
-              setDeployMode('api');
-              localStorage.setItem('soultuner_deploy_mode', 'api');
-              // API 模式下清空单独的 intent/hyde provider（复用主模型）
-              updateField('intent_llm_provider', '');
-              updateField('intent_llm_model', '');
-              updateField('hyde_llm_provider', '');
-              updateField('hyde_llm_model', '');
-            }}
-          >
-            ☁️ API 部署
-            <div style={{ fontSize: '0.7rem', fontWeight: 400, opacity: 0.7, marginTop: '2px' }}>
-              意图分析 + HyDE 共用一个模型
+    return (
+      <>
+        <h4 style={{ color: theme.colors.text.primary, margin: '0 0 1rem', fontSize: '0.95rem' }}>🤖 LLM 模型配置</h4>
+
+        <div style={{
+          padding: '0.95rem 1rem',
+          border: `1px solid ${theme.colors.border.default}`,
+          borderRadius: theme.borderRadius.md,
+          background: 'rgba(29,185,84,0.06)',
+          marginBottom: '1rem',
+        }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', gap: '1rem', alignItems: 'center' }}>
+            <div>
+              <div style={{ color: theme.colors.text.primary, fontWeight: 700, fontSize: '0.9rem' }}>
+                DashScope API 部署
+              </div>
+              <div style={{ color: theme.colors.text.muted, fontSize: '0.74rem', lineHeight: 1.5, marginTop: '0.25rem' }}>
+                默认由通义千问驱动意图分析、HyDE 与推荐解释。Key 请放在项目 .env 中，前端不会展示密钥。
+              </div>
             </div>
-          </button>
-          <button
-            style={modeButtonStyle(deployMode === 'local')}
-            onClick={() => {
-              setDeployMode('local');
-              localStorage.setItem('soultuner_deploy_mode', 'local');
-            }}
-          >
-            💻 本地部署
-            <div style={{ fontSize: '0.7rem', fontWeight: 400, opacity: 0.7, marginTop: '2px' }}>
-              分别配置意图分析 / HyDE 模型
-            </div>
-          </button>
+            <span style={{
+              padding: '0.28rem 0.55rem',
+              borderRadius: theme.borderRadius.full,
+              color: theme.colors.primary.accent,
+              border: '1px solid rgba(29,185,84,0.28)',
+              background: 'rgba(29,185,84,0.1)',
+              fontSize: '0.72rem',
+              whiteSpace: 'nowrap',
+            }}>
+              {currentProvider === 'dashscope' ? '当前默认' : '已自定义'}
+            </span>
+          </div>
         </div>
-      </div>
 
-      {/* ═══ API 模式：只配一个模型 ═══ */}
-      {deployMode === 'api' && (
-        <>
-          <div style={sectionTitleStyle}>☁️ 推荐模型（意图分析 + HyDE 共用）</div>
-          {renderModelPicker('llm_default_provider', 'llm_default_model', '提供商', '模型')}
-        </>
-      )}
+        <div style={fieldGroup}>
+          <label style={labelStyle}>主模型</label>
+          <select
+            style={selectStyle}
+            value={dashscopeModels.includes(currentModel) ? currentModel : '__custom__'}
+            onChange={e => {
+              updateField('llm_default_provider', 'dashscope');
+              updateField('intent_llm_provider', 'dashscope');
+              updateField('llm_default_model', e.target.value === '__custom__' ? '' : e.target.value);
+              updateField('intent_llm_model', e.target.value === '__custom__' ? '' : e.target.value);
+            }}
+          >
+            {dashscopeModels.map(model => <option key={model} value={model}>{model}</option>)}
+            <option value="__custom__">自定义 DashScope 模型...</option>
+          </select>
+          {!dashscopeModels.includes(currentModel) && (
+            <input
+              style={{ ...inputStyle, marginTop: '0.45rem' }}
+              value={currentModel}
+              placeholder="例如 qwen3.7-plus"
+              onChange={e => {
+                updateField('llm_default_provider', 'dashscope');
+                updateField('intent_llm_provider', 'dashscope');
+                updateField('llm_default_model', e.target.value);
+                updateField('intent_llm_model', e.target.value);
+              }}
+            />
+          )}
+        </div>
 
-      {/* ═══ 本地模式：分开配置 ═══ */}
-      {deployMode === 'local' && (
-        <>
-          <div style={sectionTitleStyle}>🧠 意图分析模型</div>
-          {renderModelPicker('intent_llm_provider', 'intent_llm_model', '提供商', '模型')}
-          {renderInput('intent_model_path', '微调模型路径（可选）', '/path/to/intent-sft-model')}
+        {renderToggle('explanation_fast_mode', '低延迟解释模式')}
+        <div style={{ fontSize: '0.72rem', color: theme.colors.text.muted, marginTop: '-0.7rem', marginBottom: '1rem', lineHeight: 1.5 }}>
+          开启后跳过长篇流式解释，只返回简短确定性说明，适合快速体验和评测。
+        </div>
 
-          <div style={sectionTitleStyle}>📝 HyDE 描述模型</div>
-          {renderModelPicker('hyde_llm_provider', 'hyde_llm_model', '提供商', '模型')}
-          {renderInput('hyde_model_path', '微调模型路径（可选）', '/path/to/hyde-grpo-model')}
-        </>
-      )}
+        <button
+          type="button"
+          onClick={() => setShowAdvancedModels(prev => !prev)}
+          style={{
+            width: '100%',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'space-between',
+            padding: '0.7rem 0.85rem',
+            borderRadius: theme.borderRadius.sm,
+            border: `1px solid ${theme.colors.border.default}`,
+            background: 'rgba(255,255,255,0.04)',
+            color: theme.colors.text.secondary,
+            cursor: 'pointer',
+            fontSize: '0.82rem',
+            marginBottom: showAdvancedModels ? '0.8rem' : 0,
+          }}
+        >
+          <span>高级选项</span>
+          <span style={{ color: theme.colors.text.muted }}>{showAdvancedModels ? '收起' : '展开'}</span>
+        </button>
 
-      {/* ═══ 解释生成模型（通用，两种模式都可独立配置）═══ */}
-      <div style={sectionTitleStyle}>💬 解释生成模型（通用）</div>
-      <div style={{ fontSize: '0.73rem', color: theme.colors.text.muted, marginBottom: '0.6rem', lineHeight: 1.5 }}>
-        负责生成推荐理由和最终解释文本（流式输出给用户），建议使用表达能力强的模型
-      </div>
-      {renderModelPicker('explain_llm_provider', 'explain_llm_model', '提供商', '模型', true)}
+        {showAdvancedModels && (
+          <div style={{
+            border: `1px solid ${theme.colors.border.default}`,
+            borderRadius: theme.borderRadius.md,
+            padding: '0.8rem 0.9rem',
+            background: 'rgba(255,255,255,0.025)',
+          }}>
+            <div style={sectionTitleStyle}>主模型提供商</div>
+            {renderModelPicker('llm_default_provider', 'llm_default_model', '提供商', '模型')}
 
-      {/* ═══ 上下文压缩（通用设置）═══ */}
-      <div style={sectionTitleStyle}>🗜️ 上下文压缩（通用）</div>
-      {renderModelPicker('compress_llm_provider', 'compress_llm_model', '提供商', '模型', true)}
+            <div style={sectionTitleStyle}>意图分析 / HyDE</div>
+            {renderModelPicker('intent_llm_provider', 'intent_llm_model', '意图模型提供商', '意图模型', true)}
+            {renderModelPicker('hyde_llm_provider', 'hyde_llm_model', 'HyDE 提供商', 'HyDE 模型', true)}
 
-      {/* ═══ 超时 & Token 预算 ═══ */}
-      {renderSlider('llm_timeout', 'LLM 超时', 10, 120, 5, '秒')}
-      {renderSlider('intent_max_tokens', '意图分析最大输出 Token', 512, 4096, 256, ' tokens')}
-      <div style={{ fontSize: '0.72rem', color: theme.colors.text.muted, marginTop: '-0.5rem', marginBottom: '1rem' }}>
-        结构化 JSON 输出预算，某些模型默认 1024 会截断，建议 2048+
-      </div>
-    </>
-  );
+            <div style={sectionTitleStyle}>解释与上下文压缩</div>
+            {renderModelPicker('explain_llm_provider', 'explain_llm_model', '解释模型提供商', '解释模型', true)}
+            {renderModelPicker('compress_llm_provider', 'compress_llm_model', '压缩模型提供商', '压缩模型', true)}
+
+            <div style={sectionTitleStyle}>调用预算</div>
+            {renderSlider('llm_timeout', 'LLM 超时', 10, 120, 5, '秒')}
+            {renderSlider('intent_max_tokens', '意图分析最大输出 Token', 512, 4096, 256, ' tokens')}
+            {renderSlider('context_total_budget', '上下文窗口预算', 2000, 16000, 500, ' tokens')}
+          </div>
+        )}
+      </>
+    );
+  };
 
   const renderRetrievalTab = () => (
     <>
