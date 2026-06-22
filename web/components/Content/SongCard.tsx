@@ -17,10 +17,51 @@ interface SongCardProps {
   lrc_url?: string;
   song_id?: string;
   platform?: string;
+  recall_sources?: string[];
+  recall_source_labels?: string[];
+  retrieval_sources?: string[];
+  retrieval_source_labels?: string[];
+  queueContext?: {
+    title: string;
+    artist: string;
+    genre?: string;
+    preview_url?: string;
+    coverUrl?: string;
+    lrc_url?: string;
+  }[];
   onRemove?: () => void;  // 从当前结果列表中删除
 }
 
-export default function SongCard({ title, artist, genre, mood, reason, preview_url, cover_url, lrc_url, song_id, platform, onRemove }: SongCardProps) {
+const SOURCE_LABELS: Record<string, string> = {
+  graph: '图谱检索',
+  dense: '向量检索',
+  vector: '向量检索',
+  lexical: '词法检索',
+  bm25: '词法检索',
+  personal: '个性化',
+  cold: '冷启动',
+  web: '联网',
+  online_search: '联网',
+};
+
+export default function SongCard({
+  title,
+  artist,
+  genre,
+  mood,
+  reason,
+  preview_url,
+  cover_url,
+  lrc_url,
+  song_id,
+  platform,
+  recall_sources,
+  recall_source_labels,
+  retrieval_sources,
+  retrieval_source_labels,
+  queueContext,
+  onRemove,
+}: SongCardProps) {
   const { currentSong, isPlaying, playSong, togglePlay: globalToggle, queue, addToQueue, removeFromQueue } = usePlayer();
   const { isLiked, toggleLike, collections, addToCollection, showToast } = useLibrary();
   const [showFolderPicker, setShowFolderPicker] = useState(false);
@@ -48,12 +89,16 @@ export default function SongCard({ title, artist, genre, mood, reason, preview_u
   const isThisPlaying = isThisActive && isPlaying;
   const liked = isLiked(title, artist);
   const inQueue = queue.some(s => s.title === title && s.artist === artist);
+  const sourceLabels = Array.from(new Set([
+    ...(recall_source_labels || retrieval_source_labels || []),
+    ...((recall_sources || retrieval_sources || []).map(source => SOURCE_LABELS[source] || source)),
+  ].filter(Boolean)));
 
   const togglePlay = (e: React.MouseEvent) => {
     e.stopPropagation();
     if (!preview_url) return;
     if (isThisActive) globalToggle();
-    else playSong({ title, artist, genre, preview_url, coverUrl: cover_url, lrc_url }, undefined);
+    else playSong({ title, artist, genre, preview_url, coverUrl: cover_url, lrc_url }, queueContext);
   };
 
   const handleLike = (e: React.MouseEvent) => {
@@ -317,7 +362,7 @@ export default function SongCard({ title, artist, genre, mood, reason, preview_u
       </div>
 
       {/* 第二行：标签（genre/mood） */}
-      {(genre || mood) && (
+      {(genre || mood || sourceLabels.length > 0 || inQueue) && (
         <div style={{ display: 'flex', gap: '0.4rem', marginTop: '0.5rem', flexWrap: 'wrap', paddingLeft: '68px' }}>
           {genre && (
             <span style={{ padding: '0.2rem 0.55rem', fontSize: '0.7rem', backgroundColor: 'rgba(255,255,255,0.06)', color: theme.colors.text.secondary, borderRadius: theme.borderRadius.full, border: `1px solid ${theme.colors.border.default}` }}>
@@ -329,6 +374,11 @@ export default function SongCard({ title, artist, genre, mood, reason, preview_u
               {mood}
             </span>
           )}
+          {sourceLabels.slice(0, 3).map(label => (
+            <span key={label} style={{ padding: '0.2rem 0.55rem', fontSize: '0.68rem', backgroundColor: 'rgba(99,102,241,0.12)', color: 'rgba(190,190,255,0.9)', borderRadius: theme.borderRadius.full, border: '1px solid rgba(99,102,241,0.25)' }}>
+              {label}
+            </span>
+          ))}
           {inQueue && (
             <span style={{ padding: '0.2rem 0.5rem', fontSize: '0.68rem', backgroundColor: 'rgba(29,185,84,0.12)', color: theme.colors.primary.accent, borderRadius: theme.borderRadius.full, border: '1px solid rgba(29,185,84,0.2)' }}>
               ▶ 播放列表

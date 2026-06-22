@@ -42,9 +42,13 @@ interface PlayerContextType {
     addToQueue: (song: Song) => void;
     removeFromQueue: (title: string, artist: string) => void;
     addAllToQueue: (songs: Song[]) => void;
+    replaceQueue: (songs: Song[]) => void;
 }
 
 const PlayerContext = createContext<PlayerContextType | undefined>(undefined);
+
+const isSameSong = (a?: Song | null, b?: Song | null) =>
+    Boolean(a && b && a.title === b.title && a.artist === b.artist);
 
 export function PlayerProvider({ children }: { children: ReactNode }) {
     const [currentSong, setCurrentSong] = useState<Song | null>(null);
@@ -123,6 +127,19 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
     }, [currentSong, queue, playMode]);
 
     const playSong = (song: Song, newQueue?: Song[]) => {
+        const audio = audioRef.current;
+        if (isSameSong(currentSong, song) && audio && !audio.ended) {
+            setCurrentSong(song);
+            if (newQueue) {
+                setQueue(newQueue);
+            }
+            if (!isPlaying && song.preview_url) {
+                startAudio(audio);
+                setIsPlaying(true);
+            }
+            return;
+        }
+
         setCurrentSong(song);
         setIsPlaying(true);
 
@@ -160,6 +177,10 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
             const newSongs = songs.filter(s => !existing.has(`${s.title}_${s.artist}`));
             return [...prev, ...newSongs];
         });
+    };
+
+    const replaceQueue = (songs: Song[]) => {
+        setQueue(songs);
     };
 
     const togglePlay = () => {
@@ -224,6 +245,7 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
                 addToQueue,
                 removeFromQueue,
                 addAllToQueue,
+                replaceQueue,
             }}
         >
             {children}
