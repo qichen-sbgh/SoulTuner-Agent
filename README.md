@@ -345,7 +345,7 @@ erDiagram
 
 ## 🧰 启动与入库参考
 
-日常只需要顶部的 3 步命令。更多部署档位、端口和在线新歌入库流程见 [DEPLOYMENT_PROFILES.md](DEPLOYMENT_PROFILES.md)。
+日常只需要顶部的 3 步命令。下面的统一入口覆盖 Lite、Standard、Full、体检、测试和入库流程。
 
 | 命令 | 用途 |
 |---|---|

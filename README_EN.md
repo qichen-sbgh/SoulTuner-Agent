@@ -344,7 +344,7 @@ erDiagram
 
 ## 🧰 Startup And Ingestion Reference
 
-For everyday use, the 3-step Docker block near the top is enough. See [DEPLOYMENT_PROFILES.md](DEPLOYMENT_PROFILES.md) for deployment profiles, ports, and online-song ingestion behavior.
+For everyday use, the 3-step Docker block near the top is enough. The commands below cover Lite, Standard, Full, diagnostics, tests, and ingestion.
 
 | Command | Purpose |
 |---|---|
