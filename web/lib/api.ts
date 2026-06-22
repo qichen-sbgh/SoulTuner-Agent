@@ -1,3 +1,5 @@
+const API_BASE = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8501';
+
 export interface JourneySegment {
     segment_id: number;
     mood: string;
@@ -64,7 +66,7 @@ export function streamRecommendations(
 
     const startStream = async () => {
         try {
-            const response = await fetch(`http://localhost:8501/api/recommendations/stream`, {
+            const response = await fetch(`${API_BASE}/api/recommendations/stream`, {
                 method: 'POST',
                 headers: {
                     'Accept': 'text/event-stream',
@@ -144,7 +146,7 @@ export async function sendUserEvent(
     artist: string,
 ): Promise<void> {
     try {
-        await fetch('http://localhost:8501/api/user-event', {
+        await fetch(`${API_BASE}/api/user-event`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
@@ -189,7 +191,7 @@ export interface DislikedSongBackend {
 
 export async function fetchLikedSongs(limit: number = 50): Promise<LikedSongBackend[]> {
     try {
-        const resp = await fetch(`http://localhost:8501/api/liked-songs?limit=${limit}`);
+        const resp = await fetch(`${API_BASE}/api/liked-songs?limit=${limit}`);
         if (!resp.ok) return [];
         const data = await resp.json();
         return data.success ? data.songs : [];
@@ -201,7 +203,7 @@ export async function fetchLikedSongs(limit: number = 50): Promise<LikedSongBack
 
 export async function fetchDislikedSongs(limit: number = 50): Promise<DislikedSongBackend[]> {
     try {
-        const resp = await fetch(`http://localhost:8501/api/disliked-songs?limit=${limit}`);
+        const resp = await fetch(`${API_BASE}/api/disliked-songs?limit=${limit}`);
         if (!resp.ok) return [];
         const data = await resp.json();
         return data.success ? data.songs : [];
@@ -214,7 +216,7 @@ export async function fetchDislikedSongs(limit: number = 50): Promise<DislikedSo
 export async function removeDislike(songTitle: string, artist: string): Promise<boolean> {
     try {
         const resp = await fetch(
-            `http://localhost:8501/api/disliked-songs?song_title=${encodeURIComponent(songTitle)}&artist=${encodeURIComponent(artist)}`,
+            `${API_BASE}/api/disliked-songs?song_title=${encodeURIComponent(songTitle)}&artist=${encodeURIComponent(artist)}`,
             { method: 'DELETE' }
         );
         if (!resp.ok) return false;
@@ -233,7 +235,7 @@ export async function deleteSongFromLibrary(
 ): Promise<{ success: boolean; message: string; deleted_files?: string[] }> {
     try {
         const resp = await fetch(
-            `http://localhost:8501/api/songs?song_title=${encodeURIComponent(songTitle)}&artist=${encodeURIComponent(artist)}`,
+            `${API_BASE}/api/songs?song_title=${encodeURIComponent(songTitle)}&artist=${encodeURIComponent(artist)}`,
             { method: 'DELETE' },
         );
         if (!resp.ok) {
@@ -254,7 +256,7 @@ export async function acquireSong(song: {
     song_id?: string;
     platform?: string;
 }): Promise<{ success: boolean; message: string; song?: any }> {
-    const resp = await fetch('http://localhost:8501/api/acquire-song', {
+    const resp = await fetch(`${API_BASE}/api/acquire-song`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -283,7 +285,7 @@ export function streamJourney(
             const provider = (typeof window !== 'undefined'
                 ? localStorage.getItem('music_selected_provider')
                 : null) || 'siliconflow';
-            const resp = await fetch('http://localhost:8501/api/journey/stream', {
+            const resp = await fetch(`${API_BASE}/api/journey/stream`, {
                 method: 'POST',
                 headers: { 'Accept': 'text/event-stream', 'Content-Type': 'application/json' },
                 body: JSON.stringify({ ...params, llm_provider: params.llm_provider || provider }),
@@ -318,7 +320,7 @@ export function streamJourney(
 
 // ---- 搜索歌曲 ----
 export async function searchMusic(query: string, genre?: string): Promise<any> {
-    const resp = await fetch('http://localhost:8501/api/search', {
+    const resp = await fetch(`${API_BASE}/api/search`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ query, genre, limit: 20 }),
@@ -362,7 +364,7 @@ export interface PendingSong {
 
 export async function fetchPendingSongs(): Promise<PendingSong[]> {
     try {
-        const resp = await fetch('http://localhost:8501/api/pending-songs');
+        const resp = await fetch(`${API_BASE}/api/pending-songs`);
         if (!resp.ok) return [];
         const data = await resp.json();
         return data.success ? data.songs : [];
@@ -382,7 +384,7 @@ export async function ingestPendingSongs(songs: {
     duration: number;
 }[]): Promise<{ success: boolean; ingested: number; message: string }> {
     try {
-        const resp = await fetch('http://localhost:8501/api/pending-songs/ingest', {
+        const resp = await fetch(`${API_BASE}/api/pending-songs/ingest`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ songs }),
@@ -400,7 +402,7 @@ export async function deletePendingSong(
 ): Promise<{ success: boolean }> {
     try {
         const resp = await fetch(
-            `http://localhost:8501/api/pending-songs?file_basename=${encodeURIComponent(fileBasename)}&ext=${encodeURIComponent(ext)}`,
+            `${API_BASE}/api/pending-songs?file_basename=${encodeURIComponent(fileBasename)}&ext=${encodeURIComponent(ext)}`,
             { method: 'DELETE' },
         );
         if (!resp.ok) return { success: false };
@@ -436,7 +438,7 @@ export async function fetchLibrarySongs(
 ): Promise<{ songs: LibrarySong[]; total: number }> {
     try {
         const resp = await fetch(
-            `http://localhost:8501/api/library-songs?offset=${offset}&limit=${limit}`
+            `${API_BASE}/api/library-songs?offset=${offset}&limit=${limit}`
         );
         if (!resp.ok) return { songs: [], total: 0 };
         const data = await resp.json();

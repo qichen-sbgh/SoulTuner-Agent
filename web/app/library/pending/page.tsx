@@ -8,6 +8,8 @@
 
 import { useState, useEffect, useCallback } from 'react';
 import { theme } from '@/styles/theme';
+
+const API_BASE = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8501';
 import { usePlayer } from '@/context/PlayerContext';
 import { useLibrary } from '@/context/LibraryContext';
 import { useRouter } from 'next/navigation';
@@ -168,7 +170,7 @@ export default function PendingPage() {
                                     {/* Cover */}
                                     <div style={{
                                         width: '46px', height: '46px', borderRadius: '6px', flexShrink: 0,
-                                        background: `url(http://localhost:8501${song.cover_url}) center/cover, linear-gradient(135deg, #333, #222)`,
+                                        background: `url(${API_BASE}${song.cover_url}) center/cover, linear-gradient(135deg, #333, #222)`,
                                     }} />
 
                                     {/* Info */}
@@ -183,7 +185,7 @@ export default function PendingPage() {
                                     </div>
 
                                     {/* Play */}
-                                    <button title="试听" onClick={e => { e.stopPropagation(); playSong({ title: song.title, artist: song.artist, preview_url: `http://localhost:8501${song.audio_url}`, coverUrl: `http://localhost:8501${song.cover_url}`, lrc_url: `http://localhost:8501${song.lrc_url}` }); }}
+                                    <button title="试听" onClick={e => { e.stopPropagation(); playSong({ title: song.title, artist: song.artist, preview_url: `${API_BASE}${song.audio_url}`, coverUrl: `${API_BASE}${song.cover_url}`, lrc_url: `${API_BASE}${song.lrc_url}` }); }}
                                         style={{ background: 'none', border: 'none', color: theme.colors.primary.accent, cursor: 'pointer', padding: '0.4rem', borderRadius: '50%', display: 'flex', transition: 'transform 0.2s' }}
                                         onMouseEnter={e => (e.currentTarget.style.transform = 'scale(1.15)')}
                                         onMouseLeave={e => (e.currentTarget.style.transform = 'scale(1)')}

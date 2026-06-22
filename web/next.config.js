@@ -1,4 +1,6 @@
 /** @type {import('next').NextConfig} */
+const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8501';
+
 const nextConfig = {
   reactStrictMode: true,
   // Docker 生产构建时跳过 ESLint（CI 已经单独检查）
@@ -14,7 +16,7 @@ const nextConfig = {
     return [
       {
         source: '/api/:path*',
-        destination: 'http://localhost:8501/:path*', // 代理到 Streamlit 后端
+        destination: `${API_BASE_URL}/:path*`,
       },
     ];
   },

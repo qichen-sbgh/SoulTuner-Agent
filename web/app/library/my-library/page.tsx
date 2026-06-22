@@ -8,6 +8,8 @@
 
 import { useState, useEffect, useCallback } from 'react';
 import { theme } from '@/styles/theme';
+
+const API_BASE = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8501';
 import { usePlayer } from '@/context/PlayerContext';
 import { useLibrary } from '@/context/LibraryContext';
 import { useRouter } from 'next/navigation';
@@ -149,7 +151,7 @@ export default function MyLibraryPage() {
                                 onMouseLeave={e => (e.currentTarget.style.backgroundColor = 'rgba(255,255,255,0.02)')}
                                 onClick={() => {
                                     if (song.audio_url) {
-                                        const baseUrl = song.audio_url.startsWith('http') ? '' : 'http://localhost:8501';
+                                        const baseUrl = song.audio_url.startsWith('http') ? '' : API_BASE;
                                         playSong({
                                             title: song.title, artist: song.artist,
                                             preview_url: `${baseUrl}${song.audio_url}`,
@@ -163,7 +165,7 @@ export default function MyLibraryPage() {
                                 <div style={{
                                     width: '46px', height: '46px', borderRadius: '6px', flexShrink: 0,
                                     background: song.cover_url
-                                        ? `url(${song.cover_url.startsWith('http') ? song.cover_url : 'http://localhost:8501' + song.cover_url}) center/cover, linear-gradient(135deg, #333, #222)`
+                                        ? `url(${song.cover_url.startsWith('http') ? song.cover_url : API_BASE + song.cover_url}) center/cover, linear-gradient(135deg, #333, #222)`
                                         : 'linear-gradient(135deg, #333, #222)',
                                     backgroundSize: 'cover',
                                     backgroundPosition: 'center',
@@ -199,12 +201,12 @@ export default function MyLibraryPage() {
                                     onClick={e => {
                                         e.stopPropagation();
                                         if (song.audio_url) {
-                                            const baseUrl = song.audio_url.startsWith('http') ? '' : 'http://localhost:8501';
+                                            const baseUrl = song.audio_url.startsWith('http') ? '' : API_BASE;
                                             playSong({
                                                 title: song.title, artist: song.artist,
                                                 preview_url: `${baseUrl}${song.audio_url}`,
-                                                coverUrl: song.cover_url ? (song.cover_url.startsWith('http') ? song.cover_url : `http://localhost:8501${song.cover_url}`) : undefined,
-                                                lrc_url: song.lrc_url ? (song.lrc_url.startsWith('http') ? song.lrc_url : `http://localhost:8501${song.lrc_url}`) : undefined,
+                                                coverUrl: song.cover_url ? (song.cover_url.startsWith('http') ? song.cover_url : `${API_BASE}${song.cover_url}`) : undefined,
+                                                lrc_url: song.lrc_url ? (song.lrc_url.startsWith('http') ? song.lrc_url : `${API_BASE}${song.lrc_url}`) : undefined,
                                             });
                                         }
                                     }}
