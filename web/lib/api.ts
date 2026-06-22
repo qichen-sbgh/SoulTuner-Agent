@@ -283,7 +283,7 @@ export function streamJourney(
             // 读取和推荐页同步的持久化模型选择
             const provider = (typeof window !== 'undefined'
                 ? localStorage.getItem('music_selected_provider')
-                : null) || 'siliconflow';
+                : null) || 'dashscope';
             const resp = await fetch('http://localhost:8501/api/journey/stream', {
                 method: 'POST',
                 headers: { 'Accept': 'text/event-stream', 'Content-Type': 'application/json' },

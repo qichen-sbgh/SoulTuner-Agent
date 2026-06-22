@@ -160,8 +160,11 @@ export default function Sidebar({ isMobile = false, isOpen = true, onClose }: Si
     background: 'rgba(10, 10, 10, 0.65)', // Semi-transparent to let stars show
     backdropFilter: 'blur(16px)',
     borderRight: `1px solid ${theme.colors.border.default}`,
-    padding: '2rem 1.25rem',
-    overflowY: 'auto' as const,
+    padding: '2rem 1.25rem 1rem',
+    boxSizing: 'border-box' as const,
+    display: 'flex',
+    flexDirection: 'column' as const,
+    overflow: 'hidden' as const,
     zIndex: 10,
     color: '#b3b3b3',
   };
@@ -212,6 +215,7 @@ export default function Sidebar({ isMobile = false, isOpen = true, onClose }: Si
           flexDirection: 'column',
           gap: '1rem',
           marginBottom: '2rem',
+          flexShrink: 0,
         }}
       >
         <div
@@ -246,7 +250,18 @@ export default function Sidebar({ isMobile = false, isOpen = true, onClose }: Si
         </div>
       </div>
 
-      <nav style={{ display: 'flex', flexDirection: 'column', gap: '1.5rem' }}>
+      <nav
+        style={{
+          display: 'flex',
+          flex: 1,
+          minHeight: 0,
+          flexDirection: 'column',
+          gap: '1.5rem',
+          overflowY: 'auto',
+          paddingRight: '0.15rem',
+          paddingBottom: '1rem',
+        }}
+      >
         {navGroups.map((group) => (
           <div key={group.title} style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
             <div style={{ paddingLeft: '0.5rem', marginBottom: '0.2rem' }}>
@@ -264,7 +279,18 @@ export default function Sidebar({ isMobile = false, isOpen = true, onClose }: Si
       </nav>
 
       {/* ──── 底部按钮区 ──── */}
-      <div style={{ marginTop: 'auto', paddingTop: '1.5rem', borderTop: `1px solid ${theme.colors.border.default}`, display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
+      <div
+        style={{
+          flexShrink: 0,
+          marginTop: '1rem',
+          marginBottom: '5.75rem',
+          paddingTop: '1rem',
+          borderTop: `1px solid ${theme.colors.border.default}`,
+          display: 'flex',
+          flexDirection: 'column',
+          gap: '0.5rem',
+        }}
+      >
         {/* 🎭 用户画像按钮 */}
         <button
           onClick={() => setProfileOpen(true)}

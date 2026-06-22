@@ -32,7 +32,7 @@ export default function RecommendationsPage() {
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [loading, setLoading] = useState(false);
   const cancelRef = useRef<(() => void) | null>(null);
-  const { addAllToQueue, playSong } = usePlayer();
+  const { playSong } = usePlayer();
   const { showToast } = useLibrary();
   const router = useRouter();
   const pathname = usePathname();
@@ -96,6 +96,16 @@ export default function RecommendationsPage() {
   const allSongs = latestAssistantWithSongs
     ? (latestAssistantWithSongs.songs || []).map((song: any, idx: number) => ({ song, msgId: latestAssistantWithSongs.id, idx }))
     : [];
+  const queueSongs = allSongs
+    .filter(s => s.song.preview_url)
+    .map(s => ({
+      title: s.song.title,
+      artist: s.song.artist,
+      genre: s.song.genre,
+      preview_url: s.song.preview_url,
+      coverUrl: s.song.cover_url,
+      lrc_url: s.song.lrc_url,
+    }));
 
   // 当最新推荐歌曲变化时，右侧面板自动滚到顶部
   useEffect(() => {
@@ -512,16 +522,9 @@ export default function RecommendationsPage() {
                   </h2>
                   <button
                     onClick={() => {
-                      const songsWithUrl = allSongs.filter(s => s.song.preview_url).map(s => s.song);
-                      if (songsWithUrl.length === 0) return;
-                      addAllToQueue(songsWithUrl.map(s => ({ title: s.title, artist: s.artist, genre: s.genre, preview_url: s.preview_url, coverUrl: s.cover_url, lrc_url: s.lrc_url })));
-                      showToast(`✚ 已将 ${songsWithUrl.length} 首歌加入播放列表`);
-                      if (songsWithUrl[0].preview_url) {
-                        playSong(
-                          { title: songsWithUrl[0].title, artist: songsWithUrl[0].artist, genre: songsWithUrl[0].genre, preview_url: songsWithUrl[0].preview_url, coverUrl: songsWithUrl[0].cover_url, lrc_url: songsWithUrl[0].lrc_url },
-                          songsWithUrl.map(s => ({ title: s.title, artist: s.artist, genre: s.genre, preview_url: s.preview_url, coverUrl: s.cover_url, lrc_url: s.lrc_url }))
-                        );
-                      }
+                      if (queueSongs.length === 0) return;
+                      playSong(queueSongs[0], queueSongs);
+                      showToast(`▶ 已设置 ${queueSongs.length} 首歌为播放列表`);
                     }}
                     title="全部播放"
                     style={{
@@ -555,6 +558,7 @@ export default function RecommendationsPage() {
                     <SongCard
                       key={`${song.title}_${song.artist}_${i}`}
                       {...song}
+                      queueContext={queueSongs}
                       onRemove={() => handleRemoveSong(msgId, idx)}
                     />
                   ))}
