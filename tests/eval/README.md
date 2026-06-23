@@ -32,6 +32,29 @@ python -m tests.eval.evaluate_outcomes --split dev --planner-temperature 0 --tim
 The timing report covers GraphZep, intent planning, each recall source,
 fusion/filter, ranking, web fallback, explanation, Agent total, and end to end.
 
+## Text-To-Audio Alignment Eval
+
+`evaluate_alignment` isolates M2D-CLAP text-to-audio alignment from the
+end-to-end Agent. It uses a frozen metadata/tag caption set and does not call
+the Planner, HyDE, or any LLM during evaluation.
+
+Build or refresh the frozen captions only as an explicit milestone action:
+
+```powershell
+python -m tests.eval.build_alignment_gold --count 100
+```
+
+Then evaluate M2D-CLAP text captions against the full Neo4j audio-vector corpus:
+
+```powershell
+python -m tests.eval.evaluate_alignment
+```
+
+Reports include git sha, dirty state, M2D-CLAP checkpoint path, corpus size,
+Recall@1/5/10, MRR, and per-caption ranks. Treat this as a relative ruler for
+comparing HyDE prompts, model swaps, or future adapters; the captions are not
+absolute human MusicCaps ground truth.
+
 ## Soft-Intent Judge
 
 `objective_soft_judge` is an early, non-cyclic heuristic for soft intents. It
